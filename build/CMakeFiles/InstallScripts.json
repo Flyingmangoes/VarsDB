@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/yakutsk/Public/rediss/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
