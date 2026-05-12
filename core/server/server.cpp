@@ -173,6 +173,10 @@ int Server::start() {
         return -1;
     }
 
+    struct storage_holder* storage = _storage_allocator();
+    setStorage(storage);
+    MessageManager::info("Storage allocated");
+
     char msg[MAX_MESSAGE_BUFFER];
     snprintf(msg, sizeof(msg), "Server listening on port %d", this->port);
     MessageManager::info(msg);
@@ -190,6 +194,10 @@ void Server::setClient(SOCKET client_fd, char* argv) {
     this->arguments = argv;
     this->client_fd = client_fd;
 }
+
+void Server::setStorage(struct storage_holder *__instances) {
+    this->storages = __instances;
+};
 
 int Server::handle_command() {
     char cmd_copy[MAX_COMMAND_BUFFER] = {0};
@@ -209,8 +217,7 @@ int Server::handle_command() {
 
     if (argc == 0) return -1;
     if(strncmp(tokens[0], "PING", 4) == 0) {
-        response = "+PONG\r\n";
-        send(client_fd, response, strlen(response), 0);
+        CommandManager::PING(this->client_fd);
         return 0;
     }
     else if (strncmp(tokens[0], "SET", 3) == 0) 
@@ -221,44 +228,16 @@ int Server::handle_command() {
             return -1;
         }
 
-        char* key = tokens[1];
-        char* value = tokens[2];
+        const char * opt = (argc >= 5) ? tokens[3] : NULL;
+        int n = (argc >= 5 && tokens[4] != NULL) ? atoi(tokens[4]) : 0;
 
-        if (argc >=  5){
-            if (tokens[4] == NULL) {
-                response = "-ERR invalid expire time\r\n";
-                send(this->client_fd, response, strlen(response), 0);
-                return -1;
-            }
-
-            int n = atoi(tokens[4]);
-            if (n <= 0) {
-                response = "-ERR invalid expire time\r\n";
-                send(this->client_fd, response, strlen(response), 0);
-                return -1;
-            }
-
-            if(strncmp(tokens[3], "EX", 2) == 0) {
-                set_with_expiry(key, value, std::chrono::seconds(n));
-            }
-            else if(strncmp(tokens[3], "PX", 2) == 0) {
-                set_with_expiry(key, value, std::chrono::milliseconds(n));
-            }
-            else {
-                response = "-ERR unknown option\r\n";
-                send(this->client_fd, response, strlen(response), 0);
-                return -1;
-            }
-        } 
-        else {
-            struct StoreValue sv;
-            sv.value = value;
-            sv.has_expiry = false;
-            this->store[key] = sv;
+        if (argc >= 5 && n <= 0) {
+            response = "-ERR invalid expire time\r\n";
+            send(this->client_fd, response, strlen(response), 0);
+            return -1;
         }
 
-        response = "+OK\r\n";
-        send(this->client_fd, response, strlen(response), 0);
+        CommandManager::SET(this->client_fd, tokens[1], tokens[2], opt, n, this->storages);
         return 0;
     }
     else if (strncmp(tokens[0], "GET", 3) == 0) {
@@ -268,34 +247,7 @@ int Server::handle_command() {
             return -1;
         }
 
-        const char* key = tokens[1];
-        char get_response[MAX_MESSAGE_BUFFER];
-
-        auto it = this->temp_store.find(key);
-        if(it != this->temp_store.end()) {
-            if(is_expired(it->second)) {
-                this->temp_store.erase(it);
-                send(this->client_fd, "$-1\r\n", 5, 0);
-                return 0;
-            }
-            else {
-                snprintf(get_response, sizeof(get_response), "+%s\r\n", it->second.value);
-                send(this->client_fd, get_response, strlen(get_response), 0);
-            }
-
-            return 0;
-        }
-
-        auto it2 = this->store.find(key);
-        if (it2 == this->store.end()) {
-            send(this->client_fd, "$-1\r\n", 5, 0);
-            return 0;
-        }
-
-        snprintf(get_response, sizeof(get_response), "+%s\r\n", it2->second.value);
-        send(this->client_fd, get_response, strlen(get_response), 0);
-        this->store.erase(key);
-
+        CommandManager::GET(this->client_fd, tokens[1], this->storages);
         return 0;
     }
     else if (strncmp(tokens[0], "ECHO", 4) == 0) 
@@ -306,9 +258,7 @@ int Server::handle_command() {
             return -1;
         }
 
-        char echo_res[MAX_MESSAGE_BUFFER];
-        snprintf(echo_res, sizeof(echo_res),"+%s\r\n", tokens[1]);
-        send(client_fd, echo_res, strlen(echo_res), 0);
+        CommandManager::ECHO(this->client_fd, tokens[1]);
         return 0;
     }
     else {

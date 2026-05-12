@@ -1,1 +1,0 @@
-/usr/bin/c++ -g -Wl,--dependency-file=CMakeFiles/redis.dir/link.d CMakeFiles/redis.dir/core/main.cpp.o CMakeFiles/redis.dir/core/server/server.cpp.o CMakeFiles/redis.dir/core/server/client.cpp.o CMakeFiles/redis.dir/core/cli/cli.cpp.o CMakeFiles/redis.dir/utils/message.cpp.o CMakeFiles/redis.dir/utils/parse.cpp.o -o out/redis

@@ -1,8 +1,7 @@
 #include <iostream>
 #include "server.hpp"
-#include "message.hpp"
-#include "parser.hpp"
-#include "cli.hpp"
+#include "utilities.hpp"
+#include "resp.hpp"
 
 int main(int argc, char **argv) {
     if (argc < 2) {

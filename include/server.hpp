@@ -15,19 +15,14 @@
 #include <unordered_map>
 #include <chrono>
 
-#include "parser.hpp"
-#include "message.hpp"
+#include "command.hpp"
+#include "server.hpp"
+#include "utilities.hpp"
 
 #define DEFAULT_PORT 6479 
 #define MAX_EVENT 32  
 #define MAX_CONNECTION 5
 #define SOCKET int
-
-struct StoreValue {
-    const char* value;
-    std::chrono::steady_clock::time_point expires_at;
-    bool has_expiry;
-};
 
 class Server {
 private:
@@ -41,22 +36,7 @@ private:
     int domain;
 
     const char* arguments;
-
-    std::unordered_map<std::string, struct StoreValue> store;
-    std::unordered_map<std::string, struct StoreValue> temp_store;
-
-    template<typename Duration> void set_with_expiry(const char* key, const char* value, Duration duration) {
-        StoreValue sv;
-        sv.value      = value;
-        sv.has_expiry = true;
-        sv.expires_at = std::chrono::steady_clock::now() + duration;
-        this->temp_store[key] = sv;
-    }
-
-    inline bool is_expired(const StoreValue& sv) {
-        if (!sv.has_expiry) return false;
-        return std::chrono::steady_clock::now() > sv.expires_at;
-    }
+    struct storage_holder *storages;
 
     int handle_command();
     int wait_client();
@@ -64,6 +44,7 @@ private:
 public: 
     Server(int domain = AF_INET, int type = SOCK_STREAM, int protocol = IPPROTO_TCP);
 
+    void setStorage(struct storage_holder* __instances);
     void setClient(SOCKET client_fd, char* argv);
     void setAddress(int port);
     int setup_server();

@@ -1,5 +1,5 @@
-#ifndef UTILS_H
-#define UTILS_H
+#ifndef REDIS_UTILS_H
+#define REDIS_UTILS_H
 
 #include <errno.h>
 #include <assert.h>
@@ -28,6 +28,30 @@ public:
 private:
     static const char* type_to_string(message_type type);
     static void get_timestamp(char* buffer, size_t size);
+};
+
+typedef enum {
+    CMD_SERVER  = 1,
+    CMD_CLIENT  = 2,
+    CMD_UNKNOWN = 0
+} cmd_target;
+
+struct target_list {
+    const char* name;
+    cmd_target  target;
+};
+
+class Parser {
+private:
+    int    argc;
+    char** argv;
+
+    static target_list targets[];
+
+public:
+    Parser(int argc, char** argv);
+
+    cmd_target parse();
 };
 
 #endif

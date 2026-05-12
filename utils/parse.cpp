@@ -1,6 +1,5 @@
 #include <iostream>
-#include "message.hpp"
-#include "parser.hpp"
+#include "utilities.hpp"
 
 struct target_list Parser::targets[] = {
     {"server", CMD_SERVER},

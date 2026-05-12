@@ -1,7 +1,7 @@
 #ifndef CLI_H
 #define CLI_H
 
-#include "message.hpp"
+#include "utilities.hpp"
 #include "server.hpp"
 
 #define CLI_PROMPT "REDIS >"

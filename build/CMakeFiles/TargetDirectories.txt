@@ -1,3 +1,0 @@
-/home/yakutsk/Public/rediss/build/CMakeFiles/redis.dir
-/home/yakutsk/Public/rediss/build/CMakeFiles/edit_cache.dir
-/home/yakutsk/Public/rediss/build/CMakeFiles/rebuild_cache.dir

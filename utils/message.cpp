@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <ctime>
-#include "message.hpp"
+#include "utilities.hpp"
 
 const char* MessageManager::type_to_string(message_type type) {
     switch (type) {

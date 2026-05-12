@@ -23,7 +23,9 @@ add_executable(redis
     core/main.cpp
     core/server/server.cpp
     core/server/client.cpp
-    core/cli/cli.cpp
+    core/cli/resp.cpp
+    core/command/all_cmd.cpp
+    core/command/store.cpp
     utils/message.cpp
     utils/parse.cpp
 )
