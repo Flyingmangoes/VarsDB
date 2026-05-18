@@ -34,3 +34,5 @@ out/*⏎
 
 build/
 build/*
+build_this_file/
+build_this_file/*

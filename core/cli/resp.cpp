@@ -10,7 +10,7 @@ int CLI_Manager::send_command(const char* cmd) {
     snprintf(buf, sizeof(buf), "%s\n", cmd);
 
     if (send(this->socket_fd, buf, strlen(buf), 0) < 0) {
-        MessageManager::error("Failed to send command", errno);
+        utils::MessageManager::error("Failed to send command", errno);
         return -1;
     }
 
@@ -22,12 +22,12 @@ int CLI_Manager::read_response() {
     ssize_t count = recv(this->socket_fd, buf, sizeof(buf) - 1, 0);
 
     if (count < 0) {
-        MessageManager::error("Failed to read response", errno);
+        utils::MessageManager::error("Failed to read response", errno);
         return -1;
     }
 
     if (count == 0) {
-        MessageManager::warn("Disconnected from server");
+        utils::MessageManager::warn("Disconnected from server");
         return -1;
     }
 

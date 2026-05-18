@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(redis
-    VERSION 0.0.2
+    VERSION 0.0.10
     LANGUAGES CXX
 )
 
@@ -21,13 +21,16 @@ endif()
 
 add_executable(redis
     core/main.cpp
-    core/server/server.cpp
-    core/server/client.cpp
-    core/cli/resp.cpp
-    core/command/all_cmd.cpp
-    core/command/store.cpp
     utils/message.cpp
     utils/parse.cpp
+    core/net/server.cpp
+    core/net/net_utils.cpp
+    core/net/client.cpp
+    core/cli/resp.cpp
+    core/command/store.cpp
+    core/command/basicmd.cpp
+    core/command/listcmd.cpp
+    core/command/streamcmd.cpp
 )
 
 target_include_directories(redis

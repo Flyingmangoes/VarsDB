@@ -1,5 +1,5 @@
-#ifndef SERVER_H
-#define SERVER_H
+#ifndef NETWORK_H
+#define NETWORK_H
 
 #include <sys/socket.h>
 #include <sys/epoll.h>
@@ -16,7 +16,7 @@
 #include <chrono>
 
 #include "command.hpp"
-#include "server.hpp"
+#include "network.hpp"
 #include "utilities.hpp"
 
 #define DEFAULT_PORT 6479 

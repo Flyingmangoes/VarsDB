@@ -1,8 +1,8 @@
-#ifndef CLI_H
-#define CLI_H
+#ifndef RESP_H
+#define RESP_H
 
 #include "utilities.hpp"
-#include "server.hpp"
+#include "network.hpp"
 
 #define CLI_PROMPT "REDIS >"
 #define CLI_EXIT "EXIT"
