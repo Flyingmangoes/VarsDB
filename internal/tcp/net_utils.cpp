@@ -1,4 +1,4 @@
-#include "network.hpp"
+#include "TCP.hpp"
 
 int SetFlag::set_socket_non_block(SOCKET _fd) {
     int flags = fcntl(_fd, F_GETFL, 0);

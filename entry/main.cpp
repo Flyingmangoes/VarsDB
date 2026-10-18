@@ -1,7 +1,6 @@
-#include <iostream>
-#include "network.hpp"
-#include "utilities.hpp"
-#include "resp.hpp"
+#include "TCP.hpp"
+#include "RESP.hpp"
+#include "Logger.hpp"
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -9,7 +8,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    cmd_target cmd = utils::Parser::parse_cmd(argv[1]);
+    cmd_type cmd = utils::Parser::parse_cmd(argv[1]);
 
     switch(cmd) {
         case CMD_SERVER: {

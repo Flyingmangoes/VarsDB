@@ -1,32 +1,47 @@
-#ifndef NETWORK_H
-#define NETWORK_H
+#ifndef TCP_H
+#define TCP_H
 
-#include <sys/socket.h>
+struct storage_holder;
+
+#include <unordered_map>
+#include <chrono>
+
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#include <io.h>
+#else
+
 #include <sys/epoll.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <poll.h>
-#include <assert.h>
-#include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <unordered_map>
-#include <chrono>
+#endif
 
-#include "command.hpp"
-#include "network.hpp"
-#include "utilities.hpp"
+#include <assert.h>
+#include <errno.h>
 
-#define DEFAULT_PORT 6479 
-#define MAX_EVENT 32  
+#include "Command.hpp"
+#include "RESP.hpp"
+
+#define DEFAULT_PORT 6479
+#define MAX_EVENT 32
 #define MAX_CONNECTION 5
-#define SOCKET int
+#if defined(_WIN32)
+using SOCKET = UINT_PTR;
+#else
+using SOCKET = int;
+#endif
 
 class Server {
 private:
-    sockaddr_in address;
+    struct sockaddr_in address;
     SOCKET socket_fd;
     SOCKET client_fd;
 
@@ -44,7 +59,7 @@ private:
 public: 
     Server(int domain = AF_INET, int type = SOCK_STREAM, int protocol = IPPROTO_TCP);
 
-    void setStorage(struct storage_holder* __instances);
+    void setStorage(struct storage_holder* storage_src);
     void setClient(SOCKET client_fd, char* argv);
     void setAddress(int port);
     int setup_server();
@@ -53,7 +68,7 @@ public:
 
 class Client {
 private:
-    sockaddr_in address;
+    struct sockaddr_in address;
     SOCKET socket_fd;
     int port;
     int domain;

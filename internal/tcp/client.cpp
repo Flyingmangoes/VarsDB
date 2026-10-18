@@ -1,5 +1,5 @@
 #include <iostream>
-#include "network.hpp"
+#include "TCP.hpp"
 
 Client::Client(int domain, int type, int protocol) {
         this->domain   = domain;
@@ -26,7 +26,7 @@ int Client::connect_to_server() {
         return -1;
     }
 
-    char msg[MAX_MESSAGE_BUFFER];
+    char msg[MAX_RESPONSE_BUFFER];
     snprintf(msg, sizeof(msg), "Connected to server on port %d", this->port);
     utils::MessageManager::info(msg);
     

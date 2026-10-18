@@ -1,7 +1,7 @@
 #include <iostream>
 #include <string.h>
 #include <chrono>
-#include "network.hpp"
+#include "TCP.hpp"
 
 #define SERVER_EXIT "EXIT"
 #define SERVER_START "START"
@@ -86,7 +86,7 @@ int Server::wait_client() {
 
         for (int i = 0; i < nfds; i++) {
             if (events[i].data.fd == STDIN_FILENO) {
-                char cmdbuffer[64] = {0};
+                char cmdbuffer[MAX_RESPONSE_BUFFER] = {0};
                 if (fgets(cmdbuffer, sizeof(cmdbuffer), stdin) == NULL) {
                     utils::MessageManager::info("Shutting down server");
                     goto shutdown;
@@ -101,12 +101,12 @@ int Server::wait_client() {
                 }
                 else if (strncmp(cmdbuffer, SERVER_START, strlen(SERVER_START)) == 0) {
                     running = true;
-                    char msg[64];
+                    char msg[MAX_RESPONSE_BUFFER];
                     snprintf(msg, sizeof(msg), "Connections on port %d", this->port);
                     utils::MessageManager::info(msg);
                 }
                 else {
-                    char msg[MAX_MESSAGE_BUFFER];
+                    char msg[MAX_RESPONSE_BUFFER];
                     snprintf(msg, sizeof(msg), "Unknown command: %s — use START or EXIT", cmdbuffer);
                     utils::MessageManager::warn(msg);
                 }
@@ -163,7 +163,7 @@ int Server::wait_client() {
                 continue;
             } else {
                 while(1) {
-                    char buf[MAX_MESSAGE_BUFFER];
+                    char buf[WAIT_BUFFER];
                     ssize_t count = recv(events[i].data.fd, buf, sizeof(buf) - 1, 0);
 
                     if (count < 0) {
@@ -194,6 +194,8 @@ int Server::wait_client() {
     }
 
 shutdown:
+    // remember this !
+    this->storages->db.clear(); 
     strg::deallocator(this->storages);
     close(epollfd);
     close(this->socket_fd);
@@ -201,7 +203,7 @@ shutdown:
 };
 
 int Server::start() {
-    char msg[MAX_MESSAGE_BUFFER];
+    char msg[MAX_RESPONSE_BUFFER];
     struct storage_holder* storage;
 
     if (listen(this->socket_fd, MAX_CONNECTION) < 0) {
@@ -211,7 +213,7 @@ int Server::start() {
 
     storage = strg::allocator();
     setStorage(storage);
-    snprintf(msg, sizeof(msg),"Storage allocated: %p", &storage);
+    snprintf(msg, sizeof(msg),"Storage allocated: %p", reinterpret_cast<void*>(&storage));
     utils::MessageManager::info(msg);
 
     while(1) {
@@ -224,7 +226,7 @@ int Server::start() {
 };
 
 int Server::handle_command() {
-    char cmd_copy[MAX_COMMAND_BUFFER] = {0};
+    char cmd_copy[MAX_ARGUMENTS_BUFFER] = {0};
     strncpy(cmd_copy, this->arguments, sizeof(cmd_copy) - 1);
     cmd_copy[sizeof(cmd_copy) - 1] = '\0';
 
@@ -295,6 +297,27 @@ int Server::handle_command() {
         GeneralCommand::EXISTS(this->client_fd, argc - 1, const_cast<const char**>(tokens + 1), this->storages);
         return 0;
     } 
+
+    else if(strncmp(tokens[0], "MOVE", 4) == 0) {
+        if(argc < 2) {
+            goto insufficient_argument_cleanup;
+        }
+
+        const char* key = tokens[1];
+        const char* value = tokens[2];
+
+        const char* opt = (argc >= 5) ? tokens[3] : NULL;
+        int n = (argc >= 5) ? atoi(tokens[5]) : 0;
+
+        if(argc >=5 && n <= 0) {
+            response = "-ERR invalid expire time\r\n";
+            send(this->client_fd, response, strlen(response), 0);
+            return -1;
+        }
+
+        GeneralCommand::MOVE(this->client_fd, key, value, opt, n, this->storages);
+        return 0;
+    }
 
     /* LIST command */
     else if(strncmp(tokens[0], "RPUSH", 5) == 0) {
