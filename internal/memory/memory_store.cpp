@@ -2,11 +2,11 @@
 
 struct ::storage_holder* vars::MemoryStorage::allocate() { 
     vars::MessageFactory::info("Allocating memory for storage");
-    return new storage_holder(); // initilize storage
+    return new storage_holder(); 
 };
 
 void vars::MemoryStorage::deallocate(struct ::storage_holder* target) {
-    delete target; //remove storage instance
+    delete target;
 };
 
 bool vars::MemoryStorage::is_expired(const ::StoreValue& sv) {

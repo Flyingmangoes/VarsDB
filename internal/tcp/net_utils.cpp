@@ -8,12 +8,12 @@ int SetFlag::set_socket_non_block(SOCKET _fd) {
 
 void Server::setAddress(int port) {
     if (port <= 0 || port > 65535 ) {
-        utils::MessageManager::warn("Not provided a port using default port");
+        vars::MessageFactory::warn("Not provided a port using default port");
         port = DEFAULT_PORT;
     }
 
     if (port < 1024) {
-        utils::MessageManager::warn("Port below 1024 required root privileges");
+        vars::MessageFactory::warn("Port below 1024 required root privileges");
     }
 
     memset(&this->address, 0, sizeof(this->address));
@@ -23,7 +23,7 @@ void Server::setAddress(int port) {
     this->address.sin_port = htons(port);
 
     this->port = port;
-    utils::MessageManager::info("Address configured");
+    vars::MessageFactory::info("Address configured");
 };
 
 void Server::setClient(SOCKET client_fd, char* argv) {
@@ -31,8 +31,8 @@ void Server::setClient(SOCKET client_fd, char* argv) {
     this->client_fd = client_fd;
 }
 
-void Server::setStorage(struct storage_holder *__instances) {
-    this->storages = __instances;
+void Server::setStorage(Storage* storage) {
+    this->storage = storage;
 };
 
 SOCKET Client::getSocket() {
@@ -41,7 +41,7 @@ SOCKET Client::getSocket() {
 
 void Client::setAddress(int port) {
     if (port <= 0 || port > 65535 ) {
-        utils::MessageManager::warn("Not provided a port using default port");
+        vars::MessageFactory::warn("Not provided a port using default port");
         port = DEFAULT_PORT;
     }
 
@@ -51,10 +51,10 @@ void Client::setAddress(int port) {
     this->address.sin_port = htons(port);
 
     if(inet_pton(AF_INET, "127.0.0.1", &this->address.sin_addr) <= 0) {
-        utils::MessageManager::error("Invalid server address", errno);
+        vars::MessageFactory::error("Invalid server address", errno);
         return;
     }
 
     this->port = port;
-    utils::MessageManager::info("Address configured");
+    vars::MessageFactory::info("Address configured");
 };

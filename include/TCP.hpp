@@ -51,15 +51,17 @@ private:
     int domain;
 
     const char* arguments;
-    struct storage_holder *storages;
+    struct Storage* storage;
 
     int handle_command();
     int wait_client();
+    int shutdown(int& epoll_fd);
+    int error_cleanup(const char* error_message);
 
 public: 
     Server(int domain = AF_INET, int type = SOCK_STREAM, int protocol = IPPROTO_TCP);
 
-    void setStorage(struct storage_holder* storage_src);
+    void setStorage(struct Storage* storage);
     void setClient(SOCKET client_fd, char* argv);
     void setAddress(int port);
     int setup_server();

@@ -13,17 +13,17 @@ typedef enum {
     HASH = 3,
     LIST = 4,
     UNKNOWN = 0
-} storage_type;
+} StorageType;
 
-struct storage_list {
+struct StorageList {
     const char* name;
-    storage_type target;
+    StorageType target;
 };
 
-extern struct storage_list storage_lists[];
+extern struct StorageList storage_lists[];
 
 struct StoreValue {
-    storage_type type = UNKNOWN; 
+    StorageType type = UNKNOWN; 
     std::string value;
     std::chrono::steady_clock::time_point expires_at;
     bool has_expiry = false;
@@ -32,23 +32,22 @@ struct StoreValue {
     std::deque<std::string> items;
 };
 
-struct storage_holder {
+struct Storage {
     std::unordered_map<std::string, struct StoreValue> db;
 };
 
-constexpr storage_type cmp_temp() { return TEMPORARY; }
-constexpr storage_type cmp_hash() { return HASH; }
-constexpr storage_type cmp_list() { return LIST; }
-constexpr storage_type cmp_standard() { return STANDARD; }
+const StorageType cmp_temp() { return TEMPORARY; }
+const StorageType cmp_hash() { return HASH; }
+const StorageType cmp_list() { return LIST; }
+const StorageType cmp_standard() { return STANDARD; }
 
 namespace vars {
     namespace MemoryStorage {
-        struct ::storage_holder* allocate();
-        void deallocate(struct ::storage_holder* target);
+        struct ::Storage* allocate();
+        void deallocate(struct ::Storage* target);
         bool is_expired(const struct ::StoreValue& sv);
 
-        std::unordered_map<std::string, struct ::StoreValue>* find_key(const char* key, struct ::storage_holder* db);
-
+        std::unordered_map<std::string, struct ::StoreValue>* find_key(const char* key, struct ::Storage* db);
         template<typename Duration> struct ::StoreValue make_expiry_value(const char* value, Duration duration) {
             StoreValue sv;
             sv.value      = std::string(value);

@@ -1,11 +1,18 @@
 #include <iostream>
 #include <string.h>
 #include <chrono>
+#include <cstdio>
 #include "TCP.hpp"
 
 #define SERVER_EXIT "EXIT"
 #define SERVER_START "START"
 #define RETRY 2
+
+#define RESPONSE_BUFFER 512 
+#define ARGUMENTS_BUFFER 256
+#define WAIT_BUFFER 256
+
+using namespace std;
 
 Server::Server(int domain, int type, int protocol) {    
     this->domain   = domain;
@@ -18,33 +25,33 @@ Server::Server(int domain, int type, int protocol) {
 int Server::setup_server() {
     this->socket_fd = socket(this->domain, this->type, this->protocol);
     if (this->socket_fd < 0) {
-        utils::MessageManager::error("Failed to set socket", errno);
+        vars::MessageFactory::error("Failed to set socket", errno);
         return -1;
     }
 
     int reuse = 1;
 
     if (setsockopt(this->socket_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-        utils::MessageManager::error("Failed to set socket option", errno);
+        vars::MessageFactory::error("Failed to set socket option", errno);
         return -1;
     }
 
     if (setsockopt(this->socket_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0) {
-        utils::MessageManager::error("Failed to set socket option", errno);
+        vars::MessageFactory::error("Failed to set socket option", errno);
         return -1;
     }
 
     if (SetFlag::set_socket_non_block(this->socket_fd) < 0) {
-        utils::MessageManager::error("Failed to set socket non block", errno);
+        vars::MessageFactory::error("Failed to set socket non block", errno);
         return -1;
     }
 
     if (bind(this->socket_fd, reinterpret_cast<sockaddr*>(&this->address), sizeof(this->address)) < 0) {
-        utils::MessageManager::error("Failed to bind socket", errno);
+        vars::MessageFactory::error("Failed to bind socket", errno);
         return -1;
     }
 
-    utils::MessageManager::info("Server Setup Complete");
+    vars::MessageFactory::info("Server Setup Complete");
     return 0;
 };
 
@@ -55,7 +62,7 @@ int Server::wait_client() {
 
     epollfd = epoll_create1(0);
     if (epollfd < 0) {
-        utils::MessageManager::error("Failed to create epoll fd", errno);
+        vars::MessageFactory::error("Failed to create epoll fd", errno);
         return -1;
     }
 
@@ -63,52 +70,52 @@ int Server::wait_client() {
     ev.data.fd = this->socket_fd;
     s = epoll_ctl(epollfd, EPOLL_CTL_ADD, this->socket_fd, &ev);
     if (s == -1) {
-        utils::MessageManager::error("Failed to add epoll opt", errno);
+        vars::MessageFactory::error("Failed to add epoll opt", errno);
         return -1;
     }
 
     ev.events = EPOLLIN;
     ev.data.fd = STDIN_FILENO;
     if(epoll_ctl(epollfd, EPOLL_CTL_ADD, STDIN_FILENO, &ev) < 0) {
-        utils::MessageManager::error("Failed to add epoll opt", errno);
+        vars::MessageFactory::error("Failed to add epoll opt", errno);
         return -1;
     }
 
-    utils::MessageManager::info("Type START to accept connections, EXIT to quit");
+    vars::MessageFactory::info("Type START to accept connections, EXIT to quit");
 
     while(1) {
         
         nfds = epoll_wait(epollfd, events, MAX_EVENT, -1);
         if (nfds < 0) {
-            utils::MessageManager::error("epoll_wait failed", errno);
+            vars::MessageFactory::error("epoll_wait failed", errno);
             break;
         }
 
         for (int i = 0; i < nfds; i++) {
             if (events[i].data.fd == STDIN_FILENO) {
-                char cmdbuffer[MAX_RESPONSE_BUFFER] = {0};
+                char cmdbuffer[RESPONSE_BUFFER] = {0};
                 if (fgets(cmdbuffer, sizeof(cmdbuffer), stdin) == NULL) {
-                    utils::MessageManager::info("Shutting down server");
-                    goto shutdown;
+                    vars::MessageFactory::info("Shutting down server");
+                    return shutdown(epollfd);
                 }
 
                 cmdbuffer[strcspn(cmdbuffer, "\r\n")] = '\0';
                 if (strlen(cmdbuffer) == 0) continue;
 
                 if (strncmp(cmdbuffer, SERVER_EXIT, strlen(SERVER_EXIT)) == 0) {
-                    utils::MessageManager::info("Shutting down server");
-                    goto shutdown;
+                    vars::MessageFactory::info("Shutting down server");
+                    return shutdown(epollfd);
                 }
                 else if (strncmp(cmdbuffer, SERVER_START, strlen(SERVER_START)) == 0) {
                     running = true;
-                    char msg[MAX_RESPONSE_BUFFER];
+                    char msg[RESPONSE_BUFFER];
                     snprintf(msg, sizeof(msg), "Connections on port %d", this->port);
-                    utils::MessageManager::info(msg);
+                    vars::MessageFactory::info(msg);
                 }
                 else {
-                    char msg[MAX_RESPONSE_BUFFER];
+                    char msg[RESPONSE_BUFFER];
                     snprintf(msg, sizeof(msg), "Unknown command: %s — use START or EXIT", cmdbuffer);
-                    utils::MessageManager::warn(msg);
+                    vars::MessageFactory::warn(msg);
                 }
                 continue;
             }
@@ -119,7 +126,7 @@ int Server::wait_client() {
                 (events[i].events & EPOLLHUP) ||
                 !(events[i].events & EPOLLIN))
             {
-                utils::MessageManager::error("Wrong epoll events", errno);
+                vars::MessageFactory::error("Wrong epoll events", errno);
 
                 epoll_ctl(epollfd, EPOLL_CTL_DEL, events[i].data.fd, NULL);
                 close(events[i].data.fd);
@@ -135,18 +142,18 @@ int Server::wait_client() {
                     int infd = accept(this->socket_fd, &in_addr, &in_len);
                     if (infd < 0) {
                         if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) break;
-                        utils::MessageManager::error("accept failed", errno);
+                        vars::MessageFactory::error("accept failed", errno);
                         break;
                     }
                     
                     s = getnameinfo(&in_addr, in_len, hbuf, sizeof(hbuf), sbuf, sizeof(sbuf), NI_NUMERICHOST | NI_NUMERICSERV);
                     if (s == 0) {
-                        utils::MessageManager::print_client(utils::MessageManager::INFO, const_cast <int *> (&infd), hbuf, sbuf);
+                        vars::MessageFactory::print_client(vars::MessageFactory::INFO, const_cast <int *> (&infd), hbuf, sbuf);
                     }
 
                     s = SetFlag::set_socket_non_block(infd);
                     if (s == -1) {
-                        utils::MessageManager::error("Failed to turn socket non blocking", errno);
+                        vars::MessageFactory::error("Failed to turn socket non blocking", errno);
                         close(infd);
                         continue;
                     }
@@ -155,7 +162,7 @@ int Server::wait_client() {
                     ev.events = EPOLLIN | EPOLLET;
                     s = epoll_ctl(epollfd, EPOLL_CTL_ADD, infd, &ev);
                     if (s < 0) {
-                        utils::MessageManager::error("Failed to add client to epoll", errno);
+                        vars::MessageFactory::error("Failed to add client to epoll", errno);
                         close(infd);
                     }
                 }
@@ -168,14 +175,14 @@ int Server::wait_client() {
 
                     if (count < 0) {
                         if (errno == EAGAIN || errno == EWOULDBLOCK) break; 
-                        utils::MessageManager::error("recv failed", errno);
+                        vars::MessageFactory::error("recv failed", errno);
                         epoll_ctl(epollfd, EPOLL_CTL_DEL, events[i].data.fd, NULL);
                         close(events[i].data.fd);
                         break;
                     }
 
                     if (count == 0) {
-                        utils::MessageManager::info("Client disconnected");
+                        vars::MessageFactory::info("Client disconnected");
                         epoll_ctl(epollfd, EPOLL_CTL_DEL, events[i].data.fd, NULL); 
                         close(events[i].data.fd);
                         break;
@@ -192,29 +199,29 @@ int Server::wait_client() {
             }
         }
     }
+};
 
-shutdown:
-    // remember this !
-    this->storages->db.clear(); 
-    strg::deallocator(this->storages);
-    close(epollfd);
+int Server::shutdown(int& epoll_fd) {
+    this->storage->db.clear(); 
+    vars::MemoryStorage::deallocate(this->storage);
+    close(epoll_fd);
     close(this->socket_fd);
     return 0;
 };
 
 int Server::start() {
-    char msg[MAX_RESPONSE_BUFFER];
-    struct storage_holder* storage;
+    char msg[RESPONSE_BUFFER];
+    Storage* storage;
 
     if (listen(this->socket_fd, MAX_CONNECTION) < 0) {
-        utils::MessageManager::error("Socket failed to listen for connection", errno);
+        vars::MessageFactory::error("Socket failed to listen for connection", errno);
         return -1;
     }
 
-    storage = strg::allocator();
+    storage = vars::MemoryStorage::allocate();
     setStorage(storage);
-    snprintf(msg, sizeof(msg),"Storage allocated: %p", reinterpret_cast<void*>(&storage));
-    utils::MessageManager::info(msg);
+    snprintf(msg, sizeof(msg),"Storage allocated: %p", (void*)&storage);
+    vars::MessageFactory::info(msg);
 
     while(1) {
     int s = wait_client();
@@ -226,81 +233,81 @@ int Server::start() {
 };
 
 int Server::handle_command() {
-    char cmd_copy[MAX_ARGUMENTS_BUFFER] = {0};
-    strncpy(cmd_copy, this->arguments, sizeof(cmd_copy) - 1);
-    cmd_copy[sizeof(cmd_copy) - 1] = '\0';
+    char copy_buf[ARGUMENTS_BUFFER] = {0};
+    strncpy(copy_buf, this->arguments, sizeof(copy_buf) - 1);
+    copy_buf[sizeof(copy_buf) - 1] = '\0';
+
+    GeneralCommand general = GeneralCommand(this->storage);
+    ListCommand list = ListCommand(this->storage);
+    StreamCommand stream = StreamCommand(this->storage);
 
     char* tokens[16];
     int argc = 0;
     
-    char* token = strtok(cmd_copy, " \r\n");
+    char* token = strtok(copy_buf, " \r\n");
     while(token != NULL && argc < 16) {
         tokens[argc++] = token;
         token = strtok(NULL, " \r\n");
     }
 
-    const char* response;
-
     if (argc == 0) return -1;
     if(strncmp(tokens[0], "PING", 4) == 0) {
-        GeneralCommand::PING(this->client_fd);
+        general.PING(this->client_fd);
         return 0;
     }
     else if (strncmp(tokens[0], "SET", 3) == 0) 
     {
         if (argc < 3) {
-           goto insufficient_argument_cleanup;
+           return this->error_cleanup("Insufficient arguments");
         }
 
         const char * opt = (argc >= 5) ? tokens[3] : NULL;
         int n = (argc >= 5 && tokens[4] != NULL) ? atoi(tokens[4]) : 0;
 
         if (argc >= 5 && n <= 0) {
-            response = "-ERR invalid expire time\r\n";
-            send(this->client_fd, response, strlen(response), 0);
-            return -1;
+            return this->error_cleanup("Invalid expire time");
         }
 
-        GeneralCommand::SET(this->client_fd, tokens[1], tokens[2], opt, n, this->storages);
+        general.SET(this->client_fd, tokens[1], tokens[2], opt, n);
         return 0;
     }
     else if (strncmp(tokens[0], "GET", 3) == 0) {
         if (argc < 2) {
-            goto insufficient_argument_cleanup;
+            return this->error_cleanup("Insufficient arguments");
         }
 
-        GeneralCommand::GET(this->client_fd, tokens[1], this->storages);
+        general.GET(this->client_fd, tokens[1]);
         return 0;
     }
     else if (strncmp(tokens[0], "ECHO", 4) == 0) 
     {
         if (argc < 2) {
-            goto insufficient_argument_cleanup;
+            return this->error_cleanup("Insufficient arguments");
         }
 
-        GeneralCommand::ECHO(this->client_fd, tokens[1]);
+        general.ECHO(this->client_fd, tokens[1]);
         return 0;
     }
     else if(strncmp(tokens[0], "DEL", 3) == 0) {
         if(argc < 2) {
-            goto insufficient_argument_cleanup;
+            return this->error_cleanup("Insufficient arguments");
         }
 
-        GeneralCommand::DEL(this->client_fd, argc - 1, const_cast<const char**>(tokens + 1), this->storages);
+        general.DEL(this->client_fd, argc - 1, const_cast<const char**>(tokens + 1));
         return 0;
     }
     else if(strncmp(tokens[0], "EXISTS", 6) == 0) {
         if(argc < 2) {
-            goto insufficient_argument_cleanup;
+            return this->error_cleanup("Insufficient arguments");
         }
 
-        GeneralCommand::EXISTS(this->client_fd, argc - 1, const_cast<const char**>(tokens + 1), this->storages);
+        general.EXISTS(this->client_fd, argc - 1, const_cast<const char**>(tokens + 1));
         return 0;
     } 
 
     else if(strncmp(tokens[0], "MOVE", 4) == 0) {
         if(argc < 2) {
-            goto insufficient_argument_cleanup;
+            return this->error_cleanup("Insufficient arguments");
         }
 
         const char* key = tokens[1];
@@ -310,36 +317,33 @@ int Server::handle_command() {
         int n = (argc >= 5) ? atoi(tokens[5]) : 0;
 
         if(argc >=5 && n <= 0) {
-            response = "-ERR invalid expire time\r\n";
-            send(this->client_fd, response, strlen(response), 0);
-            return -1;
+            this->error_cleanup("Invalid expire time");
         }
 
-        GeneralCommand::MOVE(this->client_fd, key, value, opt, n, this->storages);
+        general.MOVE(this->client_fd, key, value, opt, n);
         return 0;
     }
 
     /* LIST command */
     else if(strncmp(tokens[0], "RPUSH", 5) == 0) {
         if(argc < 2) {
-            goto insufficient_argument_cleanup;
+            return this->error_cleanup("Insufficient arguments");
         }
     }
     else if(strncmp(tokens[0], "LRANGE", 6) == 0) {
         if(argc < 2) {
-            goto insufficient_argument_cleanup;
+            return this->error_cleanup("Insufficient arguments");
         }
     }
 
     /* HASH command */
     else {
-        response = "-ERR unknown command\r\n";
-        send(client_fd, response, strlen(response), 0);
-        return -1;
+        return this->error_cleanup("Unknown command");
     }
+};
 
-insufficient_argument_cleanup:
-    response = "-ERR insufficient number of arguments given\r\n";
-    send(this->client_fd, response, strlen(response), 0);
+int Server::error_cleanup(const char* error_message){
+    std::string response = RESP_Parser::error(std::string(error_message));
+    send(this->client_fd, response.c_str(), strlen(response.c_str()), 0);
     return -1;
 };
