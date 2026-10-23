@@ -1,11 +1,11 @@
 #include "MemoryStore.hpp"
 
-struct ::storage_holder* vars::MemoryStorage::allocate() { 
+struct ::Storage* vars::MemoryStorage::allocate() { 
     vars::MessageFactory::info("Allocating memory for storage");
-    return new storage_holder(); 
+    return new Storage(); 
 };
 
-void vars::MemoryStorage::deallocate(struct ::storage_holder* target) {
+void vars::MemoryStorage::deallocate(::Storage* target) {
     delete target;
 };
 
@@ -14,15 +14,12 @@ bool vars::MemoryStorage::is_expired(const ::StoreValue& sv) {
     return std::chrono::steady_clock::now() > sv.expires_at;
 }
 
-std::unordered_map<std::string, struct ::StoreValue>* vars::MemoryStorage::find_key(const char* key, struct ::storage_holder* storage) {
-    std::unordered_map<std::string, struct ::StoreValue>* result;
-
-    auto it = storage->db.find(key);
+::StoreValue* vars::MemoryStorage::find_key(std::string_view key, ::Storage* storage) {
+    auto it = storage->db.find(std::string(key));
     if(it == storage->db.end()) {  
         vars::MessageFactory::debug("key didn't exist");
-        return NULL;
+        return nullptr;
     }
 
-    result->insert({it->first, it->second});
-    return result;
+    return &it->second;
 };

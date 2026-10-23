@@ -3,9 +3,6 @@
 
 struct storage_holder;
 
-#include <unordered_map>
-#include <chrono>
-
 #if defined(_WIN32)
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -22,17 +19,20 @@ struct storage_holder;
 #include <poll.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <cassert>
+#include <cerrno>
+#include <vector>
+#include <string>
+#include <cstdlib>   
+#include <unordered_map>
+#include <chrono>
+#include "MemoryStore.hpp"
 #endif
-
-#include <assert.h>
-#include <errno.h>
-
-#include "Command.hpp"
-#include "RESP.hpp"
 
 #define DEFAULT_PORT 6479
 #define MAX_EVENT 32
 #define MAX_CONNECTION 5
+
 #if defined(_WIN32)
 using SOCKET = UINT_PTR;
 #else
@@ -41,28 +41,25 @@ using SOCKET = int;
 
 class Server {
 private:
-    struct sockaddr_in address;
-    SOCKET socket_fd;
-    SOCKET client_fd;
+    sockaddr_in address;
+    SOCKET socket_fd = -1;
 
     int port;
     int type;
     int protocol;
     int domain;
 
-    const char* arguments;
-    struct Storage* storage;
+    Storage* storage = nullptr;
 
-    int handle_command();
+    int handle_command(const SOCKET client_fd, const std::vector<std::string>& args);
     int wait_client();
     int shutdown(int& epoll_fd);
-    int error_cleanup(const char* error_message);
+    int error_cleanup(const SOCKET client_fd, std::string error_message);
 
 public: 
     Server(int domain = AF_INET, int type = SOCK_STREAM, int protocol = IPPROTO_TCP);
 
-    void setStorage(struct Storage* storage);
-    void setClient(SOCKET client_fd, char* argv);
+    void setStorage(Storage* storage);
     void setAddress(int port);
     int setup_server();
     int start();

@@ -1,4 +1,5 @@
 #include "TCP.hpp"
+#include "RESP.hpp"
 
 int SetFlag::set_socket_non_block(SOCKET _fd) {
     int flags = fcntl(_fd, F_GETFL, 0);
@@ -26,11 +27,6 @@ void Server::setAddress(int port) {
     vars::MessageFactory::info("Address configured");
 };
 
-void Server::setClient(SOCKET client_fd, char* argv) {
-    this->arguments = argv;
-    this->client_fd = client_fd;
-}
-
 void Server::setStorage(Storage* storage) {
     this->storage = storage;
 };
@@ -57,4 +53,18 @@ void Client::setAddress(int port) {
 
     this->port = port;
     vars::MessageFactory::info("Address configured");
+};
+
+int Server::error_cleanup(const SOCKET to_remove, std::string error_message) {
+    std::string response = RESP_Parser::error(error_message);
+    size_t sent = 0;
+    while (sent<response.size()){
+        ssize_t n = send(to_remove, response.data() + sent, response.size() - sent, MSG_NOSIGNAL);
+        if (n < 0) {
+            if(errno == EINTR) continue;
+            break;
+        }
+        sent += static_cast<size_t>(n);
+    }
+    return -1;
 };

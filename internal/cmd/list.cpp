@@ -1,11 +1,7 @@
 #include "MemoryStore.hpp"
 #include "Command.hpp"
 
-ListCommand::ListCommand(Storage* storage){
-    this->storage = storage;
-};
-
-void ListCommand::RPUSH(int fd_dest, const char* key, const char* value) {
+void ListCommand::RPUSH(int fd_dest, const std::string& key, const std::string& value) {
     auto it = this->storage->db.find(key);
     if(it != this->storage->db.end()) {   
         it->second.items.push_front(std::string(value));
@@ -25,7 +21,7 @@ void ListCommand::RPUSH(int fd_dest, const char* key, const char* value) {
     return;
 };
 
-void ListCommand::LPUSH(int fd_dest, const char* key, const char* value) {
+void ListCommand::LPUSH(int fd_dest, const std::string& key, const std::string& value) {
 auto it = this->storage->db.find(key);
     if(it != this->storage->db.end()) {   
         it->second.items.push_back(std::string(value));
@@ -45,7 +41,7 @@ auto it = this->storage->db.find(key);
     return;
 };
 
-void ListCommand::LPOP(int fd_dest, const char* key){
+void ListCommand::LPOP(int fd_dest, const std::string& key){
     auto it = this->storage->db.find(key);
     if(it == this->storage->db.end()){
         send(fd_dest, "$-1\r\n", 5, 0);
@@ -56,12 +52,12 @@ void ListCommand::LPOP(int fd_dest, const char* key){
     return;
 };
 
-void ListCommand::RPOP(int fd_dest, const char* key) {
+void ListCommand::RPOP(int fd_dest, const std::string& key) {
     vars::MessageFactory::debug("RPOP Success");
     return;
 };
 
-void ListCommand::LRANGE (int fd_dest, const char* key,int start, int stop) {  
+void ListCommand::LRANGE (int fd_dest, const std::string& key,int start, int stop) {  
     vars::MessageFactory::debug("LRANGE Success");
     return;
 };

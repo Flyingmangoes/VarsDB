@@ -1,7 +1,7 @@
 #include <iostream>
 #include "TCP.hpp"
 
-#define RESPONSE_BUFFER 512
+#define RESPONSE_BUFFER 4096
 
 Client::Client(int domain, int type, int protocol) {
         this->domain   = domain;

@@ -1,170 +1,162 @@
 #include "Command.hpp"
+#include "RESP.hpp"
+#include <algorithm>
+#include <cctype>
+#include <cerrno>
 
-#define RESPONSE_BUFFER 516
+namespace {
+bool reply(int fd, const std::string& s) {
+    size_t sent = 0;
+    while (sent < s.size()) {
+        ssize_t n = send(fd, s.data() + sent, s.size() - sent, MSG_NOSIGNAL);
+        if (n < 0) {
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) continue;
+            return false;
+        }
+        sent += static_cast<size_t>(n);
+    }
+    return true;
+}
 
-GeneralCommand::GeneralCommand(Storage* storage){
+std::string upper(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return std::toupper(c); });
+    return s;
+}
+}
+
+GeneralCommand::GeneralCommand(Storage* storage) {
     this->storage = storage;
-};
+}
 
-void GeneralCommand::ECHO(int fd_dest, const char* message) {
-    char echo_response[RESPONSE_BUFFER];
-    snprintf(echo_response, sizeof(echo_response),"+%s\r\n", message);
-    send(fd_dest, echo_response, strlen(echo_response), 0);
+void GeneralCommand::ECHO(int fd_dest, const std::string& message) {
+    reply(fd_dest, RESP_Parser::bulk_string(message));
     vars::MessageFactory::debug("ECHO Success");
-    return;
-};
+}
 
 void GeneralCommand::PING(int fd_dest) {
-    const char response[RESPONSE_BUFFER] = "+PONG\r\n";
-    send(fd_dest, response, strlen(response), 0);
+    reply(fd_dest, RESP_Parser::simple_string("PONG"));
     vars::MessageFactory::debug("PING Success");
-    return;
-};
+}
 
-void GeneralCommand::SET(int fd_dest, const char* key, const char* value, const char* opt, int n) {
-    if(opt != NULL && n > 0) {
-        if(strncmp(opt, "EX", 2) == 0) {
-            this->storage->db[key] = vars::MemoryStorage::make_expiry_value(value, std::chrono::seconds(n));
-        }
-        else if(strncmp(opt, "PX", 2) == 0) {
-            this->storage->db[key] = vars::MemoryStorage::make_expiry_value(value, std::chrono::milliseconds(n));
-        }
-        else {
-            send(fd_dest, "-ERR unknown option\r\n", 21, 0);
+void GeneralCommand::SET(int fd_dest, const std::string& key, 
+    const std::string& value, const std::string& opt, int n) {
+    if (!opt.empty()) {
+        if (n <= 0) {
+            reply(fd_dest, RESP_Parser::error("ERR invalid expire time"));
             return;
         }
-    }
-    else {
-        struct StoreValue sv;
-        sv.value      = std::string(value);
+        std::string o = upper(opt);
+        if (o == "EX") {
+            this->storage->db[key] = vars::MemoryStorage::make_expiry_value(value, std::chrono::seconds(n));
+        } else if (o == "PX") {
+            this->storage->db[key] = vars::MemoryStorage::make_expiry_value(value, std::chrono::milliseconds(n));
+        } else {
+            reply(fd_dest, RESP_Parser::error("ERR unknown option"));
+            return;
+        }
+    } else {
+        StoreValue sv;
+        sv.value      = value;
         sv.has_expiry = false;
-        sv.type = STANDARD;
+        sv.type       = STANDARD;
         this->storage->db[key] = sv;
     }
 
-    send(fd_dest, "+OK\r\n", 5, 0);
+    reply(fd_dest, RESP_Parser::simple_string("OK"));
     vars::MessageFactory::debug("SET Success");
-    return;
-};
+}
 
-void GeneralCommand::GET(int fd_dest, const char* key) {
-    char res_buf[RESPONSE_BUFFER];
-
+void GeneralCommand::GET(int fd_dest, const std::string& key) {
     auto it = this->storage->db.find(key);
-    if(it == this->storage->db.end()) {
-        send(fd_dest, "$-1\r\n", 5, 0);
+    if (it == this->storage->db.end()) {
+        reply(fd_dest, RESP_Parser::null_bulk());
         return;
     }
 
-    if(it->second.type == cmp_temp()){
-        if(vars::MemoryStorage::is_expired(it->second)) {
-            this->storage->db.erase(it);
-            send(fd_dest, "$-1\r\n", 5, 0);
-            return;
-        }
+    if (it->second.has_expiry && vars::MemoryStorage::is_expired(it->second)) {
+        this->storage->db.erase(it);
+        reply(fd_dest, RESP_Parser::null_bulk());
+        return;
     }
 
-    snprintf(res_buf, sizeof(res_buf), "+%s\r\n", it->second.value.c_str());
-    send(fd_dest, res_buf, strlen(res_buf), 0);
+    reply(fd_dest, RESP_Parser::bulk_string(it->second.value));
     vars::MessageFactory::debug("GET Success");
-    return;
-};
+}
 
-void GeneralCommand::DEL(int fd_dest, int count, const char** keys) {
-    char response[RESPONSE_BUFFER];
-    int deleted = 0;
-
-    for (int i = 0; i < count; i++) {
-        deleted += this->storage->db.erase(keys[i]);
+void GeneralCommand::DEL(int fd_dest, const std::vector<std::string>& keys) {
+    long long deleted = 0;
+    for (const auto& k : keys) {
+        deleted += this->storage->db.erase(k);
     }
+    reply(fd_dest, RESP_Parser::integer(deleted));
+}
 
-    snprintf(response, sizeof(response), ":%d\r\n", deleted);
-    send(fd_dest, response, strlen(response), 0);
-};
-
-void GeneralCommand::EXISTS(int fd_dest, int count, const char** keys) {
-    char res_buf[RESPONSE_BUFFER];
-    int exists = 0;
-
-    for (int i = 0; i < count; i++) {
-        auto it = this->storage->db.find(keys[i]);
-        if(it != this->storage->db.end()){
-            exists++;
-        }
+void GeneralCommand::EXISTS(int fd_dest, const std::vector<std::string>& keys) {
+    long long exists = 0;
+    for (const auto& k : keys) {
+        if (this->storage->db.find(k) != this->storage->db.end()) exists++;
     }
-
-    snprintf(res_buf,sizeof(res_buf), ":%d\r\n", exists);
-    send(fd_dest, res_buf, strlen(res_buf), 0);
+    reply(fd_dest, RESP_Parser::integer(exists));
     vars::MessageFactory::debug("EXISTS Success");
-    return;
-};
+}
 
-void GeneralCommand::MOVE(int fd_dest, const char* key, const char* _dest, const char* opt, const int duration){
-    char res_buf[RESPONSE_BUFFER];
-    int optc = 0;
-
-    while(opt != NULL) {
-        optc++;
-    }
-
-    StorageType dest_db = RESP_Parser::parse_storage(_dest);
-    auto prev_db = vars::MemoryStorage::find_key(key, storage);
-    if(prev_db == NULL) {
-        send(fd_dest, "$-1\r\n", 20, 0);
+void GeneralCommand::MOVE(int fd_dest, const std::string& key, 
+    const std::string& storage_dest, const std::string& opt, int duration) {
+    StorageType dest_db = RESP_Parser::parse_storage(storage_dest);
+    ::StoreValue* prev = vars::MemoryStorage::find_key(key, storage);
+    if (prev == nullptr) {
+        reply(fd_dest, RESP_Parser::null_bulk());
         return;
     }
 
-    auto prev_it = prev_db->find(key);
+    
+    const std::string prev_value = prev->value;
+    const StorageType prev_type  = prev->type;
 
-    switch(dest_db) {
+    switch (dest_db) {
         case STANDARD: {
-            if(prev_it->second.type == dest_db) {
-                send(fd_dest, "-ERR key already exist\r\n", 24, 0);
+            if (prev_type == dest_db) {
+                reply(fd_dest, RESP_Parser::error("ERR key already exist"));
                 return;
             }
-
-            struct StoreValue sv;
-            sv.value = prev_it->second.value;
+            StoreValue sv;
+            sv.value      = prev_value;
             sv.has_expiry = false;
-            sv.type = STANDARD;
+            sv.type       = STANDARD;
             this->storage->db[key] = sv;
             break;
         }
         case TEMPORARY: {
-            if(prev_it->second.type == dest_db) {
-                send(fd_dest, RESP_Parser::error("Key already exists").c_str(), 24, 0);
+            if (prev_type == dest_db) {
+                reply(fd_dest, RESP_Parser::error("ERR key already exists"));
                 return;
             }
-
-            if(optc < 1) {
-                send(fd_dest, RESP_Parser::error("Insufficient argument").c_str(), 50, 0);
+            if (opt.empty() || duration <= 0) {
+                reply(fd_dest, RESP_Parser::error("ERR insufficient argument"));
                 return;
-            };
-
-            int duration = atoi(opt);
-
-            if(strncmp(opt, "PX", 2) == 0) {
-                this->storage->db[key] = vars::MemoryStorage::make_expiry_value(prev_it->second.value.c_str(), std::chrono::milliseconds(duration));
-            } 
-            else if(strncmp(opt, "EX", 2) == 0) {
-                this->storage->db[key] = vars::MemoryStorage::make_expiry_value(prev_it->second.value.c_str(), std::chrono::seconds(duration));
+            }
+            std::string o = upper(opt);
+            if (o == "PX") {
+                this->storage->db[key] = vars::MemoryStorage::make_expiry_value(prev_value, std::chrono::milliseconds(duration));
+            } else if (o == "EX") {
+                this->storage->db[key] = vars::MemoryStorage::make_expiry_value(prev_value, std::chrono::seconds(duration));
+            } else {
+                reply(fd_dest, RESP_Parser::error("ERR unknown option"));
+                return;
             }
             break;
         }
-        case HASH: {
-            break;
-        }
-        case LIST: {
-            break;
-        }
-        case UNKNOWN: {
-            snprintf(res_buf, sizeof res_buf, RESP_Parser::error("Unknown command").c_str());
-            send(fd_dest, res_buf, strlen(res_buf), 0);
-            break;
-        }
+        case HASH:
+        case LIST:
+            reply(fd_dest, RESP_Parser::error("ERR destination not implemented"));
+            return;
+        case UNKNOWN:
+        default:
+            reply(fd_dest, RESP_Parser::error("ERR unknown destination"));
+            return;
     }
-    snprintf(res_buf, sizeof(res_buf), "+OK\r\n");
-    send(fd_dest, res_buf, strlen(res_buf), 0);
+
+    reply(fd_dest, RESP_Parser::simple_string("OK"));
     vars::MessageFactory::debug("MOVE Success");
-    return;
-};
+}

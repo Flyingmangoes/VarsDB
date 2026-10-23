@@ -1,16 +1,14 @@
-#include <iostream>
-#include <string.h>
-#include <chrono>
-#include <cstdio>
 #include "TCP.hpp"
+#include "Command.hpp"
+#include "RESP.hpp"
 
 #define SERVER_EXIT "EXIT"
 #define SERVER_START "START"
 #define RETRY 2
 
-#define RESPONSE_BUFFER 512 
-#define ARGUMENTS_BUFFER 256
-#define WAIT_BUFFER 256
+#define RESPONSE_BUFFER 4096 
+#define ARGUMENTS_BUFFER 2048
+#define WAIT_BUFFER 4096
 
 using namespace std;
 
@@ -59,10 +57,12 @@ int Server::wait_client() {
     struct epoll_event ev, events[MAX_EVENT];
     int nfds, epollfd, s;
     bool running = false;
+    std::unordered_map<int, std::string> inbuf;
 
     epollfd = epoll_create1(0);
     if (epollfd < 0) {
         vars::MessageFactory::error("Failed to create epoll fd", errno);
+        close(epollfd);
         return -1;
     }
 
@@ -70,21 +70,27 @@ int Server::wait_client() {
     ev.data.fd = this->socket_fd;
     s = epoll_ctl(epollfd, EPOLL_CTL_ADD, this->socket_fd, &ev);
     if (s == -1) {
-        vars::MessageFactory::error("Failed to add epoll opt", errno);
+        vars::MessageFactory::error("Failed to add listen socket to epoll", errno);
+        close(epollfd);
         return -1;
     }
 
-    ev.events = EPOLLIN;
-    ev.data.fd = STDIN_FILENO;
-    if(epoll_ctl(epollfd, EPOLL_CTL_ADD, STDIN_FILENO, &ev) < 0) {
-        vars::MessageFactory::error("Failed to add epoll opt", errno);
-        return -1;
-    }
+    if (isatty(STDIN_FILENO)) {
+        ev.events = EPOLLIN;
+        ev.data.fd = STDIN_FILENO;
+        if (epoll_ctl(epollfd, EPOLL_CTL_ADD, STDIN_FILENO, &ev) < 0) {
+            vars::MessageFactory::error("Failed to add stdin to epoll", errno);
+            close(epollfd);
+            return -1;
+        }
 
-    vars::MessageFactory::info("Type START to accept connections, EXIT to quit");
+        vars::MessageFactory::info("Type START to accept connections, EXIT to quit");
+    } else {
+        running = true;    
+        vars::MessageFactory::info("No console attached, accepting connections on port " + this->port);
+    }
 
     while(1) {
-        
         nfds = epoll_wait(epollfd, events, MAX_EVENT, -1);
         if (nfds < 0) {
             vars::MessageFactory::error("epoll_wait failed", errno);
@@ -93,20 +99,20 @@ int Server::wait_client() {
 
         for (int i = 0; i < nfds; i++) {
             if (events[i].data.fd == STDIN_FILENO) {
-                char cmdbuffer[RESPONSE_BUFFER] = {0};
-                if (fgets(cmdbuffer, sizeof(cmdbuffer), stdin) == NULL) {
+                char cmd_buf[RESPONSE_BUFFER] = {0};
+                if (fgets(cmd_buf, sizeof(cmd_buf), stdin) == NULL) {
                     vars::MessageFactory::info("Shutting down server");
                     return shutdown(epollfd);
                 }
 
-                cmdbuffer[strcspn(cmdbuffer, "\r\n")] = '\0';
-                if (strlen(cmdbuffer) == 0) continue;
+                cmd_buf[strcspn(cmd_buf, "\r\n")] = '\0';
+                if (strlen(cmd_buf) == 0) continue;
 
-                if (strncmp(cmdbuffer, SERVER_EXIT, strlen(SERVER_EXIT)) == 0) {
+                if (strcmp(cmd_buf, SERVER_EXIT) == 0) {
                     vars::MessageFactory::info("Shutting down server");
                     return shutdown(epollfd);
                 }
-                else if (strncmp(cmdbuffer, SERVER_START, strlen(SERVER_START)) == 0) {
+                else if (strcmp(cmd_buf, SERVER_START) == 0) {
                     running = true;
                     char msg[RESPONSE_BUFFER];
                     snprintf(msg, sizeof(msg), "Connections on port %d", this->port);
@@ -114,7 +120,7 @@ int Server::wait_client() {
                 }
                 else {
                     char msg[RESPONSE_BUFFER];
-                    snprintf(msg, sizeof(msg), "Unknown command: %s — use START or EXIT", cmdbuffer);
+                    snprintf(msg, sizeof(msg), "Unknown command: %.200s — use START or EXIT", cmd_buf);
                     vars::MessageFactory::warn(msg);
                 }
                 continue;
@@ -169,41 +175,54 @@ int Server::wait_client() {
 
                 continue;
             } else {
+                const int fd = events[i].data.fd;
+                bool closed = false;
+                char buf[WAIT_BUFFER];
+
                 while(1) {
-                    char buf[WAIT_BUFFER];
-                    ssize_t count = recv(events[i].data.fd, buf, sizeof(buf) - 1, 0);
+                    ssize_t count = recv(fd, buf, sizeof(buf), 0);
+                    if (count > 0) { inbuf[fd].append(buf, count); continue; }
+                    if (count == 0) { closed = true; break; }
+                    if (errno == EINTR) continue;
+                    if (errno != EAGAIN && errno != EWOULDBLOCK) closed = true;
+                    break;
+                }
 
-                    if (count < 0) {
-                        if (errno == EAGAIN || errno == EWOULDBLOCK) break; 
-                        vars::MessageFactory::error("recv failed", errno);
-                        epoll_ctl(epollfd, EPOLL_CTL_DEL, events[i].data.fd, NULL);
-                        close(events[i].data.fd);
+                std::string& in = inbuf[fd];
+                while(!in.empty()) {
+                    ParseResult r = RESP_Parser::parse(in);
+                    if (r.status == ParseStatus::Incomplete) break;
+
+                    if (r.status == ParseStatus::Error) {
+                        error_cleanup(fd, ("ERR Protocol error: " + r.error).c_str());
+                        closed = true;
                         break;
                     }
 
-                    if (count == 0) {
-                        vars::MessageFactory::info("Client disconnected");
-                        epoll_ctl(epollfd, EPOLL_CTL_DEL, events[i].data.fd, NULL); 
-                        close(events[i].data.fd);
-                        break;
-                    }
-                    buf[count] = '\0';
+                    in.erase(0, r.consumed);
+                    if (r.args.empty()) continue;
+                    handle_command(fd, r.args);
+                }
 
-                    char *line = strtok(buf, "\n");
-                    while(line != NULL) {
-                        setClient(events[i].data.fd, line);
-                        handle_command();
-                        line = strtok(NULL, "\n");
-                    }
+                if(closed) {
+                    epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL);
+                    close(fd);
+                    inbuf.erase(fd);
+                    vars::MessageFactory::info("Client disconnected");
                 }
             }
         }
     }
+
+    return -1;
 };
 
 int Server::shutdown(int& epoll_fd) {
-    this->storage->db.clear(); 
-    vars::MemoryStorage::deallocate(this->storage);
+    if (this->storage) {
+        this->storage->db.clear();
+        vars::MemoryStorage::deallocate(this->storage);
+        this->storage = nullptr;
+    }
     close(epoll_fd);
     close(this->socket_fd);
     return 0;
@@ -211,139 +230,75 @@ int Server::shutdown(int& epoll_fd) {
 
 int Server::start() {
     char msg[RESPONSE_BUFFER];
-    Storage* storage;
 
     if (listen(this->socket_fd, MAX_CONNECTION) < 0) {
         vars::MessageFactory::error("Socket failed to listen for connection", errno);
         return -1;
     }
 
-    storage = vars::MemoryStorage::allocate();
-    setStorage(storage);
-    snprintf(msg, sizeof(msg),"Storage allocated: %p", (void*)&storage);
+    setStorage(vars::MemoryStorage::allocate());
+    snprintf(msg, sizeof(msg),"Storage allocated: %p", (void*)this->storage);
     vars::MessageFactory::info(msg);
 
     while(1) {
-    int s = wait_client();
-    if (s == RETRY) continue;
-    if (s < 0)      break;
-    break;
-}
+        int s = wait_client();
+        if (s == RETRY) continue;
+        if (s < 0)      break;
+        break;
+    }
+
+    if (this->storage) {
+        vars::MemoryStorage::deallocate(this->storage);
+        this->storage = nullptr;
+    }
+
     return 0;   
 };
 
-int Server::handle_command() {
-    char copy_buf[ARGUMENTS_BUFFER] = {0};
-    strncpy(copy_buf, this->arguments, sizeof(copy_buf) - 1);
-    copy_buf[sizeof(copy_buf) - 1] = '\0';
+int Server::handle_command(const int client_fd, const std::vector<std::string>& args) {
+    GeneralCommand general{ this->storage };
+    const size_t argc = args.size();
 
-    GeneralCommand general = GeneralCommand(this->storage);
-    ListCommand list = ListCommand(this->storage);
-    StreamCommand stream = StreamCommand(this->storage);
+    std::string cmd = args[0];
+    std::transform(cmd.begin(), cmd.end(), cmd.begin(),
+                   [](unsigned char c) { return std::toupper(c); });
 
-    char* tokens[16];
-    int argc = 0;
-    
-    char* token = strtok(copy_buf, " \r\n");
-    while(token != NULL && argc < 16) {
-        tokens[argc++] = token;
-        token = strtok(NULL, " \r\n");
+    if (cmd == "PING") {
+        general.PING(client_fd);
     }
-
-    if (argc == 0) return -1;
-    if(strncmp(tokens[0], "PING", 4) == 0) {
-        general.PING(this->client_fd);
-        return 0;
+    else if (cmd == "SET") {
+        if (argc != 3 && argc != 5)
+            return error_cleanup(client_fd, "ERR wrong number of arguments for 'set' command");
+        std::string opt = (argc == 5) ? args[3] : "";
+        int n = (argc == 5) ? atoi(args[4].c_str()) : 0;
+        if (argc == 5 && n <= 0) return error_cleanup(client_fd, "ERR invalid expire time");
+        general.SET(client_fd, args[1], args[2], opt, n);
     }
-    else if (strncmp(tokens[0], "SET", 3) == 0) 
-    {
-        if (argc < 3) {
-           return this->error_cleanup("Insufficient arguments");
-        }
-
-        const char * opt = (argc >= 5) ? tokens[3] : NULL;
-        int n = (argc >= 5 && tokens[4] != NULL) ? atoi(tokens[4]) : 0;
-
-        if (argc >= 5 && n <= 0) {
-            return this->error_cleanup("Invalid expire time");
-        }
-
-        general.SET(this->client_fd, tokens[1], tokens[2], opt, n);
-        return 0;
+    else if (cmd == "GET") {
+        if (argc != 2) return error_cleanup(client_fd, "ERR wrong number of arguments for 'get' command");
+        general.GET(client_fd, args[1]);
     }
-    else if (strncmp(tokens[0], "GET", 3) == 0) {
-        if (argc < 2) {
-            return this->error_cleanup("Insufficient arguments");
-        }
-
-        general.GET(this->client_fd, tokens[1]);
-        return 0;
+    else if (cmd == "ECHO") {
+        if (argc != 2) return error_cleanup(client_fd, "ERR wrong number of arguments for 'echo' command");
+        general.ECHO(client_fd, args[1]);
     }
-    else if (strncmp(tokens[0], "ECHO", 4) == 0) 
-    {
-        if (argc < 2) {
-            return this->error_cleanup("Insufficient arguments");
-        }
-
-        general.ECHO(this->client_fd, tokens[1]);
-        return 0;
+    else if (cmd == "DEL") {
+        if (argc < 2) return error_cleanup(client_fd, "ERR wrong number of arguments for 'del' command");
+        general.DEL(client_fd, std::vector<std::string>(args.begin() + 1, args.end()));
     }
-    else if(strncmp(tokens[0], "DEL", 3) == 0) {
-        if(argc < 2) {
-            return this->error_cleanup("Insufficient arguments");
-        }
-
-        general.DEL(this->client_fd, argc - 1, const_cast<const char**>(tokens + 1));
-        return 0;
+    else if (cmd == "EXISTS") {
+        if (argc < 2) return error_cleanup(client_fd, "ERR wrong number of arguments for 'exists' command");
+        general.EXISTS(client_fd, std::vector<std::string>(args.begin() + 1, args.end()));
     }
-    else if(strncmp(tokens[0], "EXISTS", 6) == 0) {
-        if(argc < 2) {
-            return this->error_cleanup("Insufficient arguments");
-        }
-
-        general.EXISTS(this->client_fd, argc - 1, const_cast<const char**>(tokens + 1));
-        return 0;
-    } 
-
-    else if(strncmp(tokens[0], "MOVE", 4) == 0) {
-        if(argc < 2) {
-            return this->error_cleanup("Insufficient arguments");
-        }
-
-        const char* key = tokens[1];
-        const char* value = tokens[2];
-
-        const char* opt = (argc >= 5) ? tokens[3] : NULL;
-        int n = (argc >= 5) ? atoi(tokens[5]) : 0;
-
-        if(argc >=5 && n <= 0) {
-            this->error_cleanup("Invalid expire time");
-        }
-
-        general.MOVE(this->client_fd, key, value, opt, n);
-        return 0;
+    else if (cmd == "MOVE") {
+        if (argc != 3 && argc != 5) return error_cleanup(client_fd, "ERR wrong number of arguments for 'move' command");
+        std::string opt = (argc == 5) ? args[3] : "";
+        int n = (argc == 5) ? atoi(args[4].c_str()) : 0;
+        if (argc == 5 && n <= 0) return error_cleanup(client_fd, "ERR invalid expire time");
+        general.MOVE(client_fd, args[1], args[2], opt, n);
     }
-
-    /* LIST command */
-    else if(strncmp(tokens[0], "RPUSH", 5) == 0) {
-        if(argc < 2) {
-            return this->error_cleanup("Insufficient arguments");
-        }
-    }
-    else if(strncmp(tokens[0], "LRANGE", 6) == 0) {
-        if(argc < 2) {
-            return this->error_cleanup("Insufficient arguments");
-        }
-    }
-
-    /* HASH command */
     else {
-        return this->error_cleanup("Unknown command");
+        return error_cleanup(client_fd, "ERR unknown command '" + args[0] + "'");   
     }
-};
-
-int Server::error_cleanup(const char* error_message){
-    std::string response = RESP_Parser::error(std::string(error_message));
-    send(this->client_fd, response.c_str(), strlen(response.c_str()), 0);
-    return -1;
-};
+    return 0;
+}
